@@ -6,12 +6,12 @@ It was edited in Inkscape to get `unclipped.svg`.
 
 ## Normalization
 ```
-python3 normalize7.py unclipped.svg normalized.svg
+python3 normalize.py unclipped.svg normalized.svg
 ```
 This gives rotations in `<defs>` and `<uses>` that follow:
 ```
   <defs>
-    <path id="rep0" d="m 0,0 -5.197,-8.996 h -20.77 L -31.165,0 -40.161,-5.197 -49.157,0 l 5.198,8.996 h 10.385 v 10.385 l 8.996,5.197 5.197,-8.996 H -8.996 V 5.197 Z" style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#231f20;stroke-width:0.99975002;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:10;stroke-dasharray:none;stroke-opacity:1"/>
+    <path id="rep0" d="m 0,0 -5.197,-8.996 h -20.77 L -31.165,0 -40.161,-5.197 -49.157,0 l 5.198,8.996 h 10.385 v 10.385 l 8.996,5.197 5.197,-8.996 H -8.996 V 5.197 Z" style="fill:#000000;fill-opacity:1"/>
     <use id="rep1" xlink:href="#path246" transform="rotate(120)" />
     <use id="rep2" xlink:href="#path246" transform="rotate(240)" />
     <use id="rep3" xlink:href="#path246" transform="rotate(60)" />
@@ -35,7 +35,7 @@ This was edited further into `jigsaw1.svg` and `jigsaw3.1.svg`.
 
 `jigsaw3.2.svg` is created by:
 ```
-python /home/tci/python-projects/spectre/expand10.py
+python3 expand.py
 ```
 
 Note: **Path** of `rep0` has to have `stroke:#ff0000`.
