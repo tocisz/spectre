@@ -4,7 +4,19 @@ import numpy as np
 import math
 import re
 
+# This function recursively builds a dictionary of element IDs.
+# This workaround is necessary because minidom.getElementById() does not
+# work by default.
+def build_id_map(node, id_map):
+    """Recursively builds a map of element IDs."""
+    if node.nodeType == node.ELEMENT_NODE and node.hasAttribute("id"):
+        id_map[node.getAttribute("id")] = node
+    for child in node.childNodes:
+        build_id_map(child, id_map)
+
+# This function parses an SVG transform string into a 3x3 matrix.
 def parse_transform(transform_str):
+    """Parses an SVG transform string into a 3x3 transformation matrix."""
     matrix = np.eye(3)
     if not transform_str:
         return matrix
@@ -38,40 +50,68 @@ def parse_transform(transform_str):
 
     return matrix
 
+# This function applies a transformation matrix to a point.
 def apply_matrix(pt, matrix):
+    """Applies a 3x3 matrix to a 2D point."""
     v = np.array([pt[0], pt[1], 1.0])
     res = matrix @ v
     return (res[0], res[1])
 
-def expand_uses_recursive(node, doc):
+# This function recursively expands all <use> tags.
+def expand_uses_recursive(node, doc, id_map, processed_ids=None):
+    """Recursively expands <use> elements, replacing them with their cloned references.
+    
+    This function now uses a processed_ids set to detect and prevent circular references.
+    """
+    if processed_ids is None:
+        processed_ids = set()
+
     if node.nodeType != node.ELEMENT_NODE:
         return
 
     if node.tagName == "use":
-        href = node.getAttribute("xlink:href") or node.getAttribute("href")
+        href = node.getAttributeNS("http://www.w3.org/1999/xlink", "href") or node.getAttribute("href")
         ref_id = href[1:] if href.startswith("#") else href
-        ref_el = doc.getElementById(ref_id)
+        
+        # Check for circular reference
+        if ref_id in processed_ids:
+            print(f"Warning: Circular reference detected for element with id '{ref_id}'. Stopping recursion.")
+            return
+
+        # Use our custom id_map to find the referenced element
+        ref_el = id_map.get(ref_id)
         if not ref_el:
+            print(f"Warning: Element with id '{ref_id}' not found. Skipping expansion.")
             return
 
         clone = ref_el.cloneNode(deep=True)
         transform_attr = node.getAttribute("transform")
         if transform_attr:
             old_t = clone.getAttribute("transform")
-            new_t = (old_t + " " + transform_attr).strip() if old_t else transform_attr
+            # Correctly prepend the new transform to the old one.
+            new_t = (transform_attr + " " + old_t).strip() if old_t else transform_attr
             clone.setAttribute("transform", new_t)
 
         parent = node.parentNode
         parent.replaceChild(clone, node)
-        expand_uses_recursive(clone, doc)
+
+        # Add the current ID to the processed set before recursing
+        processed_ids.add(ref_id)
+        expand_uses_recursive(clone, doc, id_map, processed_ids)
+        # Remove the ID when returning from the recursive call
+        processed_ids.remove(ref_id)
     else:
         for child in list(node.childNodes):
-            expand_uses_recursive(child, doc)
+            expand_uses_recursive(child, doc, id_map, processed_ids)
 
-def expand_uses(doc):
-    expand_uses_recursive(doc.documentElement, doc)
+# Wrapper function to start the recursive expansion.
+def expand_uses(doc, id_map):
+    """Starts the recursive expansion process for all <use> tags."""
+    expand_uses_recursive(doc.documentElement, doc, id_map)
 
+# This function parses an SVG style string into a dictionary.
 def parse_style(style_str):
+    """Parses a CSS style string into a dictionary."""
     style_dict = {}
     for item in style_str.split(";"):
         if ":" in item:
@@ -79,44 +119,148 @@ def parse_style(style_str):
             style_dict[k.strip().lower()] = v.strip().lower()
     return style_dict
 
+# This function gathers all paths and their combined transforms.
 def gather_paths(node, parent_transform=""):
+    """Recursively gathers all paths, polygons, and polylines with their combined transforms."""
     paths = []
-    transform_attr = node.getAttribute("transform") if node.hasAttribute("transform") else ""
-    combined_transform = (parent_transform + " " + transform_attr).strip()
-
+    
+    # Calculate the combined transform for the current node by combining
+    # the parent's transform with this node's transform attribute.
+    node_transform_attr = node.getAttribute("transform") if node.hasAttribute("transform") else ""
+    node_combined_transform = (parent_transform + " " + node_transform_attr).strip()
+    
+    # If the current node is a path, process it.
+    if node.tagName in ("path", "polygon", "polyline"):
+        style = parse_style(node.getAttribute("style"))
+        if style.get("stroke") == "#ff0000":
+            if node.tagName == "path":
+                d = node.getAttribute("d")
+                path = parse_path(d)
+                points = [(seg.start.real, seg.start.imag) for seg in path]
+                points.append((path[-1].end.real, path[-1].end.imag))
+            else:
+                pts = node.getAttribute("points").strip().split()
+                points = [tuple(map(float, pt.split(","))) for pt in pts]
+            paths.append((points, node_combined_transform))
+    
+    # Recurse for all child nodes, passing the current node's combined transform as the new parent transform.
     for child in node.childNodes:
         if child.nodeType != child.ELEMENT_NODE:
             continue
-        if child.tagName in ("g", "svg"):
-            paths.extend(gather_paths(child, combined_transform))
-        elif child.tagName in ("path", "polygon", "polyline"):
-            style = parse_style(child.getAttribute("style"))
-            if style.get("stroke") == "#ff0000":
-                if child.tagName == "path":
-                    d = child.getAttribute("d")
-                    path = parse_path(d)
-                    points = [(seg.start.real, seg.start.imag) for seg in path]
-                    points.append((path[-1].end.real, path[-1].end.imag))
-                else:
-                    pts = child.getAttribute("points").strip().split()
-                    points = [tuple(map(float, pt.split(","))) for pt in pts]
-                paths.append((points, combined_transform))
+        paths.extend(gather_paths(child, node_combined_transform))
+            
     return paths
 
+
+# This function transforms points and converts them to segments.
 def transform_points_to_segments(points, transform):
+    """Transforms a list of points and returns them as a list of segments."""
     matrix = parse_transform(transform)
     abs_points = [apply_matrix(pt, matrix) for pt in points]
     return [(abs_points[i], abs_points[i+1]) for i in range(len(abs_points)-1)]
 
-doc = minidom.parse("jigsaw2.2.svg")
-expand_uses(doc)
-paths = gather_paths(doc.documentElement)
+def remove_duplicate_segments(segments_list, tolerance=1):
+    """
+    Removes duplicate segments from the list of all segments by checking
+    if endpoints are within a given tolerance.
+    """
+    deduplicated_list = []
+    
+    # Flatten the list of lists into a single list of segments
+    all_segments = [seg for polygon_segments in segments_list for seg in polygon_segments]
 
+    for new_seg in all_segments:
+        p1_new, p2_new = new_seg
+        
+        is_duplicate = False
+        for existing_seg in deduplicated_list:
+            p1_existing, p2_existing = existing_seg
+            
+            # Check for proximity of the start and end points in both directions
+            if ((abs(p1_new[0] - p1_existing[0]) < tolerance and
+                 abs(p1_new[1] - p1_existing[1]) < tolerance and
+                 abs(p2_new[0] - p2_existing[0]) < tolerance and
+                 abs(p2_new[1] - p2_existing[1]) < tolerance) or
+                (abs(p1_new[0] - p2_existing[0]) < tolerance and
+                 abs(p1_new[1] - p2_existing[1]) < tolerance and
+                 abs(p2_new[0] - p1_existing[0]) < tolerance and
+                 abs(p2_new[1] - p1_existing[1]) < tolerance)):
+                is_duplicate = True
+                break
+        
+        if not is_duplicate:
+            deduplicated_list.append(new_seg)
+                
+    return deduplicated_list
+
+def create_segments_svg(segments_list, original_doc, output_filename="output_segments.svg"):
+    """
+    Generates a new SVG file from a list of segments.
+    Instead of creating a new file, it appends a new group to a copy of the original document.
+    """
+    svg_tag = original_doc.getElementsByTagName("svg")[0]
+    
+    # Define the style for the new segments
+    style = 'display:inline;fill:#ffffff;fill-opacity:1;stroke:#ff0000'
+
+    # Create the new 'cuts' group
+    cuts_group = original_doc.createElement("g")
+    cuts_group.setAttribute("id", "cuts")
+    cuts_group.setAttribute("style", style)
+    
+    for seg in segments_list:
+        p1, p2 = seg
+        
+        # Create a new path element for each segment
+        path_element = original_doc.createElement("path")
+        path_element.setAttribute("d", f"M {p1[0]} {p1[1]} L {p2[0]} {p2[1]}")
+        
+        # Append the path to the cuts group
+        cuts_group.appendChild(path_element)
+    
+    # Append the cuts group to the root SVG element
+    svg_tag.appendChild(cuts_group)
+
+    # Save the modified document
+    with open(output_filename, "w") as f:
+        f.write(original_doc.toprettyxml())
+    
+    print(f"Output SVG file '{output_filename}' generated successfully with a new 'cuts' layer.")
+
+
+# -------------------- Main Script Execution --------------------
+
+# 1. Parse the SVG file to get a document for expansion
+expanded_doc = minidom.parse("jigsaw3.1.svg")
+
+# 2. Build the ID map, which is crucial for finding elements by ID
+id_map = {}
+build_id_map(expanded_doc.documentElement, id_map)
+
+# 3. Expand all <use> tags in the copy
+expand_uses(expanded_doc, id_map)
+
+# 4. Gather all red-stroked paths from the expanded document
+paths = gather_paths(expanded_doc.documentElement)
+
+# 5. Transform the points of each path and store the segments
 result = []
 for points, transform in paths:
     result.append(transform_points_to_segments(points, transform))
 
-for i, segs in enumerate(result):
-    print(f"Polygon {i}:")
-    for s in segs:
-        print("  ", s)
+# Print the segments to the console for verification
+# for i, segs in enumerate(result):
+#     print(f"Polygon {i}:")
+#     for s in segs:
+#         print("   ", s)
+
+# 6. Deduplicate the segments
+deduplicated_segments = remove_duplicate_segments(result, tolerance=1)
+
+print(f"There are {len(deduplicated_segments)} deduplicated segments")
+
+# 7. Parse the original SVG file *again* to get a clean document for output
+original_doc = minidom.parse("jigsaw3.1.svg")
+
+# 8. Generate and save the new SVG file with deduplicated segments
+create_segments_svg(deduplicated_segments, original_doc, "jigsaw3.2.svg")
