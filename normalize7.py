@@ -47,23 +47,42 @@ def find_rotations(paths, reps_idx):
 
     return rotations
 
-def create_rotated_defs(paths, reps_idx, rotations, output_svg):
+def create_svg_with_rotated_defs_and_uses(paths, reps_idx, rotations, clusters, representatives, output_file):
     base_path = paths[reps_idx[0]].cloneNode(True)
+    base_path_id = base_path.getAttribute("id") or "base_rep"
+    base_path.setAttribute("id", base_path_id)
     if base_path.hasAttribute("transform"):
         base_path.removeAttribute("transform")
 
-    with open(output_svg, "w", encoding="utf-8") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         f.write('<svg xmlns="http://www.w3.org/2000/svg" ')
         f.write('xmlns:xlink="http://www.w3.org/1999/xlink">\n')
+
+        default_style = "fill:#000000;fill-opacity:1"
+        # <defs> with base path and all representatives
         f.write("  <defs>\n")
-        f.write(f'    {base_path.toxml()}\n')
+        # Write only rep0 (the first representative) with a unique id
+        path_el = paths[representatives[0]].cloneNode(True)
+        path_el.setAttribute("id", "rep0")
+        path_el.setAttribute("style", default_style)
+        if path_el.hasAttribute("transform"):
+            path_el.removeAttribute("transform")
+        f.write(f"    {path_el.toxml()}\n")
+
+        # Rotated uses of base path
+        for angle in rotations:
+            if angle != 0:
+                f.write(f'    <use id="rep{rotations.index(angle)}" xlink:href="#rep0" transform="rotate({angle})" />\n')
         f.write("  </defs>\n\n")
 
-        for angle in rotations:
-            if angle == 0:
-                f.write(f'  <use xlink:href="#{base_path.getAttribute("id")}" />\n')
-            else:
-                f.write(f'  <use xlink:href="#{base_path.getAttribute("id")}" transform="rotate({angle})" />\n')
+        # Use each cluster member as <use>
+        for cluster_idx, cluster in enumerate(clusters):
+            for p_idx in cluster:
+                transform = paths[p_idx].getAttribute("transform")
+                f.write(f'  <use xlink:href="#rep{cluster_idx}"')
+                if transform:
+                    f.write(f' transform="{transform}"')
+                f.write(" />\n")
 
         f.write("</svg>\n")
 
@@ -71,7 +90,7 @@ def create_rotated_defs(paths, reps_idx, rotations, output_svg):
 # 1. Parse SVG as before, cluster paths, find representatives.
 # 2. reps_idx = [list of indices of 6 big cluster reps]
 # 3. rotations = find_rotations(paths, reps_idx)
-# 4. create_rotated_defs(paths, reps_idx, rotations, "output.svg")
+# 4. create_svg_with_rotated_defs_and_uses(paths, reps_idx, rotations, "output.svg")
 
 def extract_absolute_vertices(svg_filename):
     doc = minidom.parse(svg_filename)
@@ -136,32 +155,6 @@ def find_representative(cluster, vertices):
             rep_idx = i
     return rep_idx
 
-def create_svg_with_defs(paths, clusters, representatives, output_file):
-    with open(output_file, "w", encoding="utf-8") as f:
-        f.write('<svg xmlns="http://www.w3.org/2000/svg" ')
-        f.write('xmlns:xlink="http://www.w3.org/1999/xlink">\n')
-
-        # <defs> with representative paths
-        f.write("  <defs>\n")
-        for i, rep_idx in enumerate(representatives):
-            path_el = paths[rep_idx].cloneNode(True)
-            path_el.setAttribute("id", f"rep{i}")
-            if path_el.hasAttribute("transform"):  # remove transform
-                path_el.removeAttribute("transform")
-            f.write(f"    {path_el.toxml()}\n")
-        f.write("  </defs>\n\n")
-
-        # Use each cluster member as <use>
-        for cluster_idx, cluster in enumerate(clusters):
-            for p_idx in cluster:
-                transform = paths[p_idx].getAttribute("transform")
-                f.write(f'  <use xlink:href="#rep{cluster_idx}"')
-                if transform:
-                    f.write(f' transform="{transform}"')
-                f.write(" />\n")
-
-        f.write("</svg>\n")
-
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Usage: python svg_cluster_defs.py input.svg output.svg")
@@ -176,6 +169,5 @@ if __name__ == "__main__":
     big_clusters = [c for c in clusters if len(c) >= 2]
     representatives = [find_representative(c, vertices) for c in big_clusters]
     rotations = find_rotations(paths, representatives)
-    create_rotated_defs(paths, representatives, rotations, output_svg)
-    create_svg_with_defs(paths, big_clusters, representatives, output_svg)
+    create_svg_with_rotated_defs_and_uses(paths, representatives, rotations, big_clusters, representatives, output_svg)
     print(f"SVG with defs written to {output_svg}")
