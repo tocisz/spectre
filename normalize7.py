@@ -173,10 +173,9 @@ if __name__ == "__main__":
     doc, paths, vertices = extract_absolute_vertices(svg_file)
     clusters = cluster_paths(vertices)
 
-    big_clusters = [c for c in clusters if len(c) >= 30]
+    big_clusters = [c for c in clusters if len(c) >= 2]
     representatives = [find_representative(c, vertices) for c in big_clusters]
-
-    rotations = find_rotations(paths, reps_idx)
-    create_rotated_defs(paths, reps_idx, rotations, output_svg)
-    # create_svg_with_defs(paths, big_clusters, representatives, output_svg)
+    rotations = find_rotations(paths, representatives)
+    create_rotated_defs(paths, representatives, rotations, output_svg)
+    create_svg_with_defs(paths, big_clusters, representatives, output_svg)
     print(f"SVG with defs written to {output_svg}")

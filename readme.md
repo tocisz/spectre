@@ -90,6 +90,8 @@ This gives rotations in `<defs>` and `<uses>` that follow:
 ```
 Giving `normalized2.svg`.
 
+*TODO: This should be done automatically with `normalize7.py` but it's not finished.*
+
 ## Expansion
 This was edited further into `jigsaw1.svg` and `jigsaw3.1.svg`.
 
