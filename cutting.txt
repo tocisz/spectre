@@ -1,0 +1,2 @@
+Raster Engrave: 3.8 (pot) = 5 mA
+Vector Cut: 11? pot = 20 mA 
